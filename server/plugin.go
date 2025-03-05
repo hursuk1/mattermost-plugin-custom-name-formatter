@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -77,6 +78,48 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 		return nil, model.NewAppError("ExecuteCommand", "plugin.command.execute_command.app_error", nil, err.Error(), http.StatusInternalServerError)
 	}
 	return response, nil
+}
+
+// UserWillLogin Hook 실행 (로그인 직전 사용자 정보 수정)
+func (p *Plugin) UserWillLogIn(c *plugin.Context, user *model.User) string {
+	p.API.LogWarn("UserWillLogin hook triggered", "user_id", user.Id, "original_firstname", user.FirstName)
+
+	formattedFirstName := formatFirstName(user.FirstName)
+
+	// firstname만 변경이 필요한 경우에만 업데이트
+	if formattedFirstName != user.FirstName {
+		user.FirstName = formattedFirstName
+		p.API.LogInfo("Updated firstname", "user_id", user.Id, "new_firstname", formattedFirstName)
+
+		// 변경된 정보 사용자 데이터베이스에 반영
+		_, err := p.API.UpdateUser(user)
+		if err != nil {
+			p.API.LogError("Failed to update user", "user_id", user.Id, "error", err.Error())
+			return "Failed to update user"
+		}
+		p.API.LogInfo("Successfully updated user firstname", "user_id", user.Id, "new_firstname", user.FirstName)
+	} else {
+		p.API.LogInfo("No update needed for firstname", "user_id", user.Id)
+	}
+
+	return ""
+}
+
+// `_` → 공백, `/` 전까지 이름만 추출
+func formatFirstName(firstname string) string {
+	if firstname == "" {
+		return firstname
+	}
+
+	// "/" 앞부분만 가져옴
+	// parts := strings.Split(firstname, "/")
+	// cleanName := parts[0]
+
+	// "_"를 공백으로 변환하고 괄호, 쉼표 처리
+	formatted := strings.ReplaceAll(firstname, "_", " ")
+	formatted = strings.ReplaceAll(formatted, "  ", " ") // 중복 공백 제거
+
+	return strings.TrimSpace(formatted)
 }
 
 // See https://developers.mattermost.com/extend/plugins/server/reference/
